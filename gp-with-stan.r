@@ -69,6 +69,6 @@ fig2c <- ggplot(tmp, aes(x=x, y=y)) +
 ## Save plots for the web
 w <- 6
 h <- 4
-ggsave("fig2a-rstan.png", fig2a, width=w, height=h)
-ggsave("fig2b-rstan.png", fig2b, width=w, height=h)
-ggsave("fig2c-rstan.png", fig2c, width=w, height=h)
+ggsave("fig2a-rstan.png", fig2a, width=w, height=hh, dpi=150)
+ggsave("fig2b-rstan.png", fig2b, width=w, height=hh, dpi=150)
+ggsave("fig2c-rstan.png", fig2c, width=w, height=hh, dpi=150)

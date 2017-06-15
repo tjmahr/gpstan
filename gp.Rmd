@@ -1,0 +1,114 @@
+---
+title: "Playing with Gaussian processes"
+output: 
+  ghdown::github_html_document: 
+    keep_md: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, 
+  comment = "#>",
+  collapse = TRUE)
+options(width = 85)
+```
+
+```{r}
+library(rstan)
+```
+
+The plot seem too wiggly. I am not sure if the Stan code is 100% correct. Or
+whether the problem is the sigma term.
+
+```{r, cache = TRUE, results = 'hide'}
+# Compile the model
+m_exe <- stan_model("./gp-fit.stan")
+```
+
+```{r}
+m_exe
+```
+
+
+```{r}
+# Stan data
+m_data <- list(
+  N1 = 10, 
+  x1 = 1:10, 
+  y1 = as.vector(scale(lme4::sleepstudy$Reaction[1:10])))
+
+# x values over which to predict new ys
+new_xs <- seq(1, 12, by = .2)
+
+# Remove the xs that have a known y
+m_data$x2 <- new_xs[!(new_xs %in% m_data$x1)]
+m_data$N2 <- length(m_data$x2)
+```
+
+```{r}
+m_fit <- sampling(m_exe, m_data, chains = 1)
+m_fit
+```
+
+
+```{r}
+library(dplyr, warn.conflicts = FALSE)
+library(ggplot2)
+
+# Create a dataframe of x values and the names of inferred y values
+inferred_data_names <- tibble(
+  x = m_data$x2, 
+  point = sprintf("y2[%s]", seq_along(x)))
+
+# Get the posterior samples into a long format and add the y values
+posterior_inferred <- as.data.frame(m_fit) %>% 
+  tibble::as_tibble() %>% 
+  select(starts_with("y2"), eta_sq, rho_sq, sigma_sq) %>% 
+  tibble::rowid_to_column("draw") %>% 
+  tidyr::gather(point, value, -draw, -eta_sq, -rho_sq, -sigma_sq) %>% 
+  left_join(inferred_data_names) %>% 
+  select(draw, eta_sq, rho_sq, sigma_sq, x, y = value)
+
+df_observed <- tibble(x = m_data$x1, y = m_data$y1)
+
+# dataframe of process parameters
+gp_parameters <- posterior_inferred %>% 
+  distinct(draw, eta_sq, rho_sq, sigma_sq)
+
+# Create a "posterior" for the observed values
+posterior_observed <- df_observed %>% 
+  tidyr::expand(tidyr::nesting(x, y), draw = 1:1000) %>% 
+  left_join(gp_parameters, by = "draw")
+
+posterior <- bind_rows(posterior_inferred, posterior_observed)
+to_plot <- sample(unique(posterior$draw), 50)
+posterior_plot <- posterior %>% 
+  filter(draw %in% to_plot)
+
+ggplot(df_observed) + 
+  aes(x = x, y = y) + 
+  geom_line(aes(group = draw), data = posterior_plot, alpha = .2) + 
+  geom_point(size = 3) 
+```
+
+Plot the process at different eta and rho quartiles
+
+```{r, fig.width = 8, fig.height = 8}
+grid_definition <- posterior %>% 
+  distinct(draw, eta_sq, rho_sq) %>% 
+  mutate(eta_bin = ntile(eta_sq, 4),
+         rho_bin = ntile(rho_sq, 4)) %>% 
+  group_by(eta_bin, rho_bin) %>% 
+  sample_n(20) %>% 
+  ungroup()
+
+grid_data <- posterior %>% 
+  inner_join(grid_definition)
+
+ggplot(data = grid_data) + 
+  aes(x = x, y = y) + 
+  geom_line(aes(group = draw), alpha = .2) + 
+  geom_point(size = 3, data = df_observed) + 
+  facet_grid(eta_bin ~ rho_bin, labeller = label_both)
+```
+

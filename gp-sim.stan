@@ -1,7 +1,4 @@
-// Sample from Gaussian process
-// All data parameters must be passed as a list to the Stan call
-// Based on original file from https://code.google.com/p/stan/source/browse/src/models/misc/gaussian-process/
-
+# Sample from a Gaussian process
 data {
   int<lower=1> N;
   real x[N];

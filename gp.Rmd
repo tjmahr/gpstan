@@ -17,10 +17,16 @@ options(width = 85)
 library(rstan)
 ```
 
-The plot seem too wiggly. I am not sure if the Stan code is 100% correct. Or
-whether the problem is the sigma term.
 
-```{r, cache = TRUE, results = 'hide'}
+We have 10 observed x-y values. Use a Gaussian process to estimate y-values in
+between and beyond those points.
+
+
+## Estimate a Gaussian process
+
+Here's the model in Stan.
+
+```{r gp-fit-stan, cache = TRUE, results = 'hide'}
 # Compile the model
 m_exe <- stan_model("./gp-fit.stan")
 ```
@@ -29,6 +35,7 @@ m_exe <- stan_model("./gp-fit.stan")
 m_exe
 ```
 
+Pass in some data.
 
 ```{r}
 # Stan data
@@ -45,13 +52,16 @@ m_data$x2 <- new_xs[!(new_xs %in% m_data$x1)]
 m_data$N2 <- length(m_data$x2)
 ```
 
+Get 1,000 samples from the posterior.
+
 ```{r}
 m_fit <- sampling(m_exe, m_data, chains = 1)
 m_fit
 ```
 
+Plot some samples from the process.
 
-```{r}
+```{r gp-samples}
 library(dplyr, warn.conflicts = FALSE)
 library(ggplot2)
 
@@ -91,13 +101,18 @@ ggplot(df_observed) +
   geom_point(size = 3) 
 ```
 
-Plot the process at different eta and rho quartiles
+The plot seems too wiggly. I am not sure if the Stan code is 100% correct. Or
+whether the problem is the sigma term.
 
-```{r, fig.width = 8, fig.height = 8}
+### Parameter exploration
+
+Plot the process at different eta and rho quartiles.
+
+```{r gp-samples-by-parameters, fig.width = 8, fig.height = 8}
 grid_definition <- posterior %>% 
   distinct(draw, eta_sq, rho_sq) %>% 
-  mutate(eta_bin = ntile(eta_sq, 4),
-         rho_bin = ntile(rho_sq, 4)) %>% 
+  mutate(eta_bin = ntile(eta_sq, 3),
+         rho_bin = ntile(rho_sq, 3)) %>% 
   group_by(eta_bin, rho_bin) %>% 
   sample_n(20) %>% 
   ungroup()
@@ -112,3 +127,87 @@ ggplot(data = grid_data) +
   facet_grid(eta_bin ~ rho_bin, labeller = label_both)
 ```
 
+## Try a noiseless model?
+
+This is essentially the same model, but `sigma_sq` (the noise term added to the
+diagonal of the matrix) is no longer an estimated parameter.
+
+```{r gp-fit-no-noise-stan, cache = TRUE, results = 'hide'}
+# Compile the model
+m2_exe <- stan_model("./gp-fit-no-noise.stan")
+```
+
+```{r}
+m2_exe
+```
+
+```{r}
+m2_data <- m_data
+m2_data$sigma_sq <- 0.001
+```
+
+```{r}
+m2_fit <- sampling(m2_exe, m2_data, chains = 1)
+m2_fit
+```
+
+Now, plot some samples.
+
+```{r gp-no-noise-samples}
+# Create a dataframe of x values and the names of inferred y values
+inferred_data_names <- tibble(
+  x = m_data$x2, 
+  point = sprintf("y2[%s]", seq_along(x)))
+
+# Get the posterior samples into a long format and add the y values
+posterior_inferred <- as.data.frame(m2_fit) %>% 
+  tibble::as_tibble() %>% 
+  select(starts_with("y2"), eta_sq, rho_sq) %>% 
+  tibble::rowid_to_column("draw") %>% 
+  tidyr::gather(point, value, -draw, -eta_sq, -rho_sq) %>% 
+  left_join(inferred_data_names) %>% 
+  select(draw, eta_sq, rho_sq, x, y = value)
+
+df_observed <- tibble(x = m_data$x1, y = m_data$y1)
+
+# dataframe of process parameters
+gp_parameters <- posterior_inferred %>% 
+  distinct(draw, eta_sq, rho_sq)
+
+# Create a "posterior" for the observed values
+posterior_observed <- df_observed %>% 
+  tidyr::expand(tidyr::nesting(x, y), draw = 1:1000) %>% 
+  left_join(gp_parameters, by = "draw")
+
+posterior <- bind_rows(posterior_inferred, posterior_observed)
+to_plot <- sample(unique(posterior$draw), 50)
+posterior_plot <- posterior %>% 
+  filter(draw %in% to_plot)
+
+ggplot(df_observed) + 
+  aes(x = x, y = y) + 
+  geom_line(aes(group = draw), data = posterior_plot, alpha = .2) + 
+  geom_point(size = 3) 
+```
+
+Okay, when I don't have a sigma term, the inferred data no longer looks like
+utter noise.
+
+```{r gp-no-noise-samples-by-parameters, fig.width = 8, fig.height = 8}
+grid_definition <- posterior %>% 
+  distinct(draw, eta_sq, rho_sq) %>% 
+  mutate(eta_bin = ntile(eta_sq, 3),
+         rho_bin = ntile(rho_sq, 3)) %>% 
+  group_by(eta_bin, rho_bin) %>% 
+  sample_n(20) %>% 
+  ungroup()
+
+grid_data <- posterior %>% 
+  inner_join(grid_definition)
+
+ggplot(data = grid_data) + 
+  aes(x = x, y = y) + 
+  geom_line(aes(group = draw), alpha = .2) + 
+  geom_point(size = 3, data = df_observed) + 
+  facet_grid(eta_bin ~ rho_bin, labeller = label_both)
+```

@@ -98,7 +98,8 @@ posterior_plot <- posterior %>%
 ggplot(df_observed) + 
   aes(x = x, y = y) + 
   geom_line(aes(group = draw), data = posterior_plot, alpha = .2) + 
-  geom_point(size = 3) 
+  geom_point(size = 3)  + 
+  theme(plot.margin = unit(c(.02, .02, .02, .02), "npc"))
 ```
 
 The plot seems too wiggly. I am not sure if the Stan code is 100% correct. Or
@@ -106,7 +107,7 @@ whether the problem is the sigma term.
 
 ### Parameter exploration
 
-Plot the process at different eta and rho quartiles.
+Plot the process at different eta and rho bins.
 
 ```{r gp-samples-by-parameters, fig.width = 8, fig.height = 8}
 grid_definition <- posterior %>% 
@@ -126,6 +127,32 @@ ggplot(data = grid_data) +
   geom_point(size = 3, data = df_observed) + 
   facet_grid(eta_bin ~ rho_bin, labeller = label_both)
 ```
+
+### Posterior predictive distribution
+
+Maybe the sigma term is more useful when we study the posterior not as a
+collection of individual lines, but as a big urn of samples that we can compute
+quantiles over.
+
+```{r prediction-intervals}
+stat_quantile_ribbon <- function(interval, alpha = .1, ...) {
+  stat_summary(
+    fun.data = median_hilow, 
+    fun.args = list(conf.int = interval), 
+    geom = "ribbon", 
+    alpha = alpha)
+} 
+
+ggplot(posterior) + 
+  aes(x = x, y = y) + 
+  stat_quantile_ribbon(.95, .1) + 
+  stat_quantile_ribbon(.8, .1) +
+  stat_quantile_ribbon(.5, .1) + 
+  geom_point(size = 3, data = df_observed) + 
+  labs(caption = "Shaded: 50%, 80%, 95% posterior prediction intervals") + 
+  theme(plot.margin = unit(c(.02, .02, .02, .02), "npc"))
+```
+
 
 ## Try a noiseless model?
 
@@ -187,7 +214,8 @@ posterior_plot <- posterior %>%
 ggplot(df_observed) + 
   aes(x = x, y = y) + 
   geom_line(aes(group = draw), data = posterior_plot, alpha = .2) + 
-  geom_point(size = 3) 
+  geom_point(size = 3)  + 
+  theme(plot.margin = unit(c(.02, .02, .02, .02), "npc"))
 ```
 
 Okay, when I don't have a sigma term, the inferred data no longer looks like
